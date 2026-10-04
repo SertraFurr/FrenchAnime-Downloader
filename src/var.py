@@ -14,7 +14,7 @@ class SourceDomains:
         "mivalyo": ("Mivalyo", ["mivalyo.com"]),
         "smooth": ("Smoothpre", ["smoothpre.com", "Smoothpre.com"]),
         "embed4me": ("Embed4me", ["embed4me.com", "embed4me"]),
-        "uqload": ("Uqload", ["uqload.is", "uqload"]),
+        "uqload": ("Uqload", ["uqload.is", "uqload","uqload.vc"]),
         "ansembed": ("AnsEmbed", ["ansembed.net"]),
         "voe": ("Voe", ["voe","teresapoliticallearn"]),
         "filemoon": ("Filemoon", ["bysesukior.com", "filemoon", "bysedikamoum.com"]),
