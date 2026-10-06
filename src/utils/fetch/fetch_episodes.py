@@ -326,7 +326,8 @@ def _franime_request_args():
     return req_headers, cookies
 
 
-_FRANIME_MIN_GAP = 0.35          # seconds between two API calls
+_FRANIME_MIN_GAP = 0.7           # seconds between two API calls (0.35s got us throttled after ~140 calls)
+_franime_throttled = [False]     # set when franime starts serving decoy links
 _franime_last_call = [0.0]
 
 
@@ -374,6 +375,11 @@ def get_franime_players(anime_id, season_index, episode_index, lang, expected=No
             break
         if r.status_code != 200:
             break
+        if not r.text.strip().startswith("https://franime.fr/watch2"):
+            # Past some request volume the API keeps answering 200 but with a
+            # random, unrelated Sibnet link instead of the real watch2 one.
+            _franime_throttled[0] = True
+            break
         player_url = decode_franime_watch_url(r.text)
         if player_url:
             urls.append(player_url)
@@ -419,11 +425,16 @@ def fetch_franime_episodes(base_url, headers=None, wanted_episodes=None):
     anime_id, position, episodes = found
 
     print_status("Fetching Franime player sources...", "loading")
+    _franime_throttled[0] = False
     by_key = {}
     for number, ep in enumerate(episodes, 1):
+        if _franime_throttled[0]:
+            break
         if wanted_episodes and number not in wanted_episodes:
             continue
         for lang in ("vo", "vf"):
+            if _franime_throttled[0]:
+                break
             # the catalogue already says which languages exist for this episode
             if not ep["lang"][lang]["lecteurs"]:
                 continue
@@ -431,6 +442,10 @@ def fetch_franime_episodes(base_url, headers=None, wanted_episodes=None):
             for name, url in players.items():
                 by_key.setdefault(f"{name} ({FRANIME_LANG_NAMES[lang]})", {})[number] = url
 
+    if _franime_throttled[0]:
+        print_status("Franime is throttling this connection (it answers fake links after too many requests). "
+                     "Stopped to avoid wrong results - wait 10-15 minutes and retry, with fewer episodes if you can.", "error")
+        return None
     if not by_key:
         print_status("No working video players found for this season", "error")
         return None
