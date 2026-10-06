@@ -35,7 +35,10 @@ def ensure_domain_cookies(domain, test_url=None, extra_headers=None):
         if check_domain_cookies(domain, request_headers, test_url, extra_headers):
             return
 
-    print_status(f"{domain} is behind Cloudflare too - needs its own cookie.", "info")
+    if stored:
+        print_status(f"The stored {domain} cookie was refused (expired, or your IP / User-Agent changed) - paste a new one.", "info")
+    else:
+        print_status(f"{domain} is behind Cloudflare too - no cookie stored for it yet.", "info")
     while True:
         cf_clearance, user_agent = tutorial_input(domain=domain)
         set_domain_cookies(domain, cf_clearance, user_agent)
