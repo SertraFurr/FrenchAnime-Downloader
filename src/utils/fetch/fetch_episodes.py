@@ -326,20 +326,51 @@ def _franime_request_args():
     return req_headers, cookies
 
 
-def get_franime_players(anime_id, season_index, episode_index, lang):
-    """Player URLs of one episode in one language, in the same order as the
-    catalogue's `lecteurs` list. The API answers 404 once there are no more."""
-    req_headers, cookies = _franime_request_args()
-    urls = []
-    i = 0
-    while i < 30:
-        url = f"{FRANIME_API}/{anime_id}/{season_index}/{episode_index}/{lang}/{i}"
+_FRANIME_MIN_GAP = 0.35          # seconds between two API calls
+_franime_last_call = [0.0]
+
+
+def _franime_get(url, req_headers, cookies):
+    """One API call, paced, and patient with the rate limit: franime answers 429
+    (Retry-After ~10s) after ~25 quick requests, and treating that like "no more
+    players" silently dropped the last episodes of a selection."""
+    r = None
+    for _ in range(6):
+        wait = _FRANIME_MIN_GAP - (time.time() - _franime_last_call[0])
+        if wait > 0:
+            time.sleep(wait)
+        _franime_last_call[0] = time.time()
         try:
             r = requests.get(url, headers=req_headers, cookies=cookies, timeout=30)
         except requests.RequestException:
+            return None
+        if r.status_code != 429:
+            return r
+        try:
+            delay = int(r.headers.get("Retry-After", 10))
+        except ValueError:
+            delay = 10
+        time.sleep(min(delay, 30) + 1)
+    return r
+
+
+def get_franime_players(anime_id, season_index, episode_index, lang, expected=None):
+    """Player URLs of one episode in one language, in the same order as the
+    catalogue's `lecteurs` list (`expected` = its length, which saves the final
+    404 request). The API answers 404 once there are no more."""
+    req_headers, cookies = _franime_request_args()
+    urls = []
+    i = 0
+    while i < (expected or 30):
+        url = f"{FRANIME_API}/{anime_id}/{season_index}/{episode_index}/{lang}/{i}"
+        r = _franime_get(url, req_headers, cookies)
+        if r is None:
             break
         if r.status_code == 403:
             print_status("Franime refused the request (Cloudflare cookie missing or expired).", "error")
+            break
+        if r.status_code == 429:
+            print_status(f"Franime rate limit still active - episode {episode_index + 1} ({lang}) is incomplete.", "warning")
             break
         if r.status_code != 200:
             break
@@ -350,12 +381,12 @@ def get_franime_players(anime_id, season_index, episode_index, lang):
     return urls
 
 
-def build_franime_players(anime_id, season_index, episode_index, lang):
+def build_franime_players(anime_id, season_index, episode_index, lang, expected=None):
     from src.utils.get.get_player_choice import _detect_host
 
     players = {}
     seen = {}
-    for url in get_franime_players(anime_id, season_index, episode_index, lang):
+    for url in get_franime_players(anime_id, season_index, episode_index, lang, expected):
         host = _detect_host("", [url]).capitalize() or "Unknown"
         seen[host] = seen.get(host, 0) + 1
         key = host if seen[host] == 1 else f"{host} {seen[host]}"
@@ -396,7 +427,7 @@ def fetch_franime_episodes(base_url, headers=None, wanted_episodes=None):
             # the catalogue already says which languages exist for this episode
             if not ep["lang"][lang]["lecteurs"]:
                 continue
-            players = build_franime_players(anime_id, position, number - 1, lang)
+            players = build_franime_players(anime_id, position, number - 1, lang, len(ep["lang"][lang]["lecteurs"]))
             for name, url in players.items():
                 by_key.setdefault(f"{name} ({FRANIME_LANG_NAMES[lang]})", {})[number] = url
 
