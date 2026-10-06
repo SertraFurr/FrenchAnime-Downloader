@@ -5,14 +5,19 @@ from src.utils.check.is_cloudflare_here import check_if_cloudflare_enabled, chec
 
 SITE_DISPLAY_NAMES = {"anime-sama": "Anime-Sama", "nakanime": "Nakanime", "franime": "FRAnime"}
 
+_prefilled_cookies = {}
+
+
 def tutorial_input(domain=None):
     domain = domain or get_domain()
-    print_status("Cloudflare may require a cookie for this site. Setup is optional; press Enter to continue without one.", "info")
-    print_status(f"1. Open {domain} in your browser.", "info")
-    print_status("2. Press F12 to open Developer Tools.", "info")
-    print_status(f"3. Go to the 'Application' tab → Cookies → select {domain}.", "info")
-    print_status("4. Copy the value of the 'cf_clearance' cookie.", "info")
-    cf_clearance = input("Paste the cf_clearance value here: ").strip().strip("'\"")
+    cf_clearance = _prefilled_cookies.pop(domain, None)
+    if cf_clearance is None:
+        print_status("Cloudflare may require a cookie for this site. Setup is optional; press Enter to continue without one.", "info")
+        print_status(f"1. Open {domain} in your browser.", "info")
+        print_status("2. Press F12 to open Developer Tools.", "info")
+        print_status(f"3. Go to the 'Application' tab → Cookies → select {domain}.", "info")
+        print_status("4. Copy the value of the 'cf_clearance' cookie.", "info")
+        cf_clearance = input("Paste the cf_clearance value here: ").strip().strip("'\"")
     if not cf_clearance:
         return None, None
 
@@ -27,8 +32,16 @@ def tutorial_input(domain=None):
 
 
 def wants_cloudflare_cookie(domain):
-    answer = input(f"Do you want to provide a Cloudflare cookie for {domain}? (y/N): ").strip().lower()
-    return answer in ("y", "yes")
+    raw = input(f"Do you want to provide a Cloudflare cookie for {domain}? (y/N): ").strip().strip("'\"")
+    if raw.lower() in ("y", "yes"):
+        return True
+    # The cookie itself pasted straight at this question (the old prompt asked
+    # for it right away): use it instead of silently taking it for a "no".
+    if len(raw) > 30 and " " not in raw:
+        _prefilled_cookies[domain] = raw
+        print_status("That looks like the cf_clearance value itself - using it.", "info")
+        return True
+    return False
 
 
 _cloudflare_skipped_domains = set()
@@ -47,11 +60,19 @@ def ensure_domain_cookies(domain, test_url=None, extra_headers=None):
     stored = get_domain_cookies(domain)
     if stored:
         request_headers = {"User-Agent": stored[1]["User-Agent"]}
-        if check_domain_cookies(domain, request_headers, test_url, extra_headers):
+        verdict = check_domain_cookies(domain, request_headers, test_url, extra_headers)
+        if verdict is not False:
+            # True = accepted; None = site unreachable right now: keep the
+            # cookie, a network hiccup must not cost the user a good one
+            if verdict is None:
+                print_status(f"Could not reach {domain} to check its cookie - keeping the stored one.", "warning")
             return
         set_domain_cookies(domain, "", "")
 
-    print_status(f"{domain} may be behind Cloudflare.", "info")
+    if stored:
+        print_status(f"The stored {domain} cookie was refused (expired, or your IP / User-Agent changed).", "info")
+    else:
+        print_status(f"{domain} may be behind Cloudflare - no cookie stored for it yet.", "info")
     if not wants_cloudflare_cookie(domain):
         _cloudflare_skipped_domains.add(domain)
         print_status(f"Continuing without Cloudflare cookies for {domain}. The site may still block requests.", "warning")
@@ -64,8 +85,12 @@ def ensure_domain_cookies(domain, test_url=None, extra_headers=None):
         return
 
     set_domain_cookies(domain, cf_clearance, user_agent)
-    if check_domain_cookies(domain, {"User-Agent": user_agent}, test_url, extra_headers):
+    verdict = check_domain_cookies(domain, {"User-Agent": user_agent}, test_url, extra_headers)
+    if verdict:
         print_status(f"{domain} cookies are valid.", "success")
+        return
+    if verdict is None:
+        print_status(f"Could not reach {domain} to check the cookie - keeping it.", "warning")
         return
 
     set_domain_cookies(domain, "", "")
@@ -82,7 +107,8 @@ if cloudflare:
     if cookies_info:
         cf_clearance, stored_headers = cookies_info
         user_agent = stored_headers.get("User-Agent")
-        if not check_cookies(domain=get_domain(), headers={"User-Agent": user_agent}):
+        # only a real refusal erases the cookie; None = site unreachable, keep it
+        if check_cookies(domain=get_domain(), headers={"User-Agent": user_agent}) is False:
             set_cookies("", "")
             cookies_info = False
 
@@ -91,7 +117,7 @@ if cloudflare:
             cf_clearance, user_agent = tutorial_input()
             if cf_clearance and user_agent:
                 set_cookies(cf_clearance, user_agent)
-                if check_cookies(domain=get_domain(), headers={"User-Agent": user_agent}):
+                if check_cookies(domain=get_domain(), headers={"User-Agent": user_agent}) is not False:
                     headers = generate_requests_headers(cf_clearance, user_agent)
                 else:
                     set_cookies("", "")

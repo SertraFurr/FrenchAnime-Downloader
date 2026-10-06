@@ -111,6 +111,21 @@ def extract_franime_season(url):
 
 
 def find_franime_anime(anime_id, headers=None):
+    # One anime is ~6 KB from /anime-by-id/ (no cookie needed) where the full
+    # catalogue is ~11 MB: ask for that, and only fall back to scanning the
+    # catalogue if the answer is not the anime we asked for.
+    req_headers = {"User-Agent": "Mozilla/5.0"}
+    if headers and "User-Agent" in headers:
+        req_headers["User-Agent"] = headers["User-Agent"]
+    try:
+        r = requests.get(f"https://api.franime.fr/api/anime-by-id/{anime_id}", headers=req_headers, timeout=20)
+        if r.status_code == 200:
+            data = r.json()
+            if isinstance(data, dict) and data.get("id") == anime_id and "saisons" in data:
+                return data
+    except Exception:
+        pass
+
     from src.utils.search.search_anime import _fetch_franime_catalogue
     data = _fetch_franime_catalogue(headers)
 
@@ -118,6 +133,7 @@ def find_franime_anime(anime_id, headers=None):
         if a["id"] == anime_id:
             return a
     return None
+
 
 def extraire_numero(titre):
     liste = re.findall(r"\d+(?:\.\d+)?", titre)
