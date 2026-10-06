@@ -5,14 +5,19 @@ from src.utils.check.is_cloudflare_here import check_if_cloudflare_enabled, chec
 
 SITE_DISPLAY_NAMES = {"anime-sama": "Anime-Sama", "nakanime": "Nakanime", "franime": "FRAnime"}
 
+_prefilled_cookies = {}
+
+
 def tutorial_input(domain=None):
     domain = domain or get_domain()
-    print_status("Cloudflare may require a cookie for this site. Setup is optional; press Enter to continue without one.", "info")
-    print_status(f"1. Open {domain} in your browser.", "info")
-    print_status("2. Press F12 to open Developer Tools.", "info")
-    print_status(f"3. Go to the 'Application' tab → Cookies → select {domain}.", "info")
-    print_status("4. Copy the value of the 'cf_clearance' cookie.", "info")
-    cf_clearance = input("Paste the cf_clearance value here: ").strip().strip("'\"")
+    cf_clearance = _prefilled_cookies.pop(domain, None)
+    if cf_clearance is None:
+        print_status("Cloudflare may require a cookie for this site. Setup is optional; press Enter to continue without one.", "info")
+        print_status(f"1. Open {domain} in your browser.", "info")
+        print_status("2. Press F12 to open Developer Tools.", "info")
+        print_status(f"3. Go to the 'Application' tab → Cookies → select {domain}.", "info")
+        print_status("4. Copy the value of the 'cf_clearance' cookie.", "info")
+        cf_clearance = input("Paste the cf_clearance value here: ").strip().strip("'\"")
     if not cf_clearance:
         return None, None
 
@@ -27,8 +32,16 @@ def tutorial_input(domain=None):
 
 
 def wants_cloudflare_cookie(domain):
-    answer = input(f"Do you want to provide a Cloudflare cookie for {domain}? (y/N): ").strip().lower()
-    return answer in ("y", "yes")
+    raw = input(f"Do you want to provide a Cloudflare cookie for {domain}? (y/N): ").strip().strip("'\"")
+    if raw.lower() in ("y", "yes"):
+        return True
+    # The cookie itself pasted straight at this question (the old prompt asked
+    # for it right away): use it instead of silently taking it for a "no".
+    if len(raw) > 30 and " " not in raw:
+        _prefilled_cookies[domain] = raw
+        print_status("That looks like the cf_clearance value itself - using it.", "info")
+        return True
+    return False
 
 
 _cloudflare_skipped_domains = set()
