@@ -88,7 +88,10 @@ def set_domain_cookies(domain, cf_clearance_value, user_agent_value):
 def check_domain_cookies(domain, headers, test_url=None, extra_headers=None):
     """test_url: when the Cloudflare rule only covers part of the site (e.g.
     franime's API), check against a URL under that rule instead of the home
-    page, which can answer 200 even with an expired cookie."""
+    page, which can answer 200 even with an expired cookie.
+
+    Returns True (accepted), False (refused: 403, missing or mismatched) or
+    None (could not reach the site, unknown)."""
     stored = get_domain_cookies(domain)
     if stored is False:
         return False
@@ -106,7 +109,10 @@ def check_domain_cookies(domain, headers, test_url=None, extra_headers=None):
         req = requests.get(test_url or f"https://{domain}", headers=request_headers, timeout=10)
         return req.status_code != 403
     except requests.RequestException:
-        return False
+        # Network hiccup (timeout, connection reset...): that says nothing about
+        # the cookie. None = "could not check", callers must not treat it as
+        # refused (a refused cookie gets erased).
+        return None
 
 
 def check_cookies(domain, headers):
@@ -137,4 +143,4 @@ def check_cookies(domain, headers):
             return False
     except requests.RequestException as e:
         print_status(f"Request failed: {e}", "error")
-        return False
+        return None   # unknown, not "refused": callers must not erase the cookie for this

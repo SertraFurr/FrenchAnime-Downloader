@@ -47,7 +47,12 @@ def ensure_domain_cookies(domain, test_url=None, extra_headers=None):
     stored = get_domain_cookies(domain)
     if stored:
         request_headers = {"User-Agent": stored[1]["User-Agent"]}
-        if check_domain_cookies(domain, request_headers, test_url, extra_headers):
+        verdict = check_domain_cookies(domain, request_headers, test_url, extra_headers)
+        if verdict is not False:
+            # True = accepted; None = site unreachable right now: keep the
+            # cookie, a network hiccup must not cost the user a good one
+            if verdict is None:
+                print_status(f"Could not reach {domain} to check its cookie - keeping the stored one.", "warning")
             return
         set_domain_cookies(domain, "", "")
 
@@ -67,8 +72,12 @@ def ensure_domain_cookies(domain, test_url=None, extra_headers=None):
         return
 
     set_domain_cookies(domain, cf_clearance, user_agent)
-    if check_domain_cookies(domain, {"User-Agent": user_agent}, test_url, extra_headers):
+    verdict = check_domain_cookies(domain, {"User-Agent": user_agent}, test_url, extra_headers)
+    if verdict:
         print_status(f"{domain} cookies are valid.", "success")
+        return
+    if verdict is None:
+        print_status(f"Could not reach {domain} to check the cookie - keeping it.", "warning")
         return
 
     set_domain_cookies(domain, "", "")
@@ -85,7 +94,8 @@ if cloudflare:
     if cookies_info:
         cf_clearance, stored_headers = cookies_info
         user_agent = stored_headers.get("User-Agent")
-        if not check_cookies(domain=get_domain(), headers={"User-Agent": user_agent}):
+        # only a real refusal erases the cookie; None = site unreachable, keep it
+        if check_cookies(domain=get_domain(), headers={"User-Agent": user_agent}) is False:
             set_cookies("", "")
             cookies_info = False
 
@@ -94,7 +104,7 @@ if cloudflare:
             cf_clearance, user_agent = tutorial_input()
             if cf_clearance and user_agent:
                 set_cookies(cf_clearance, user_agent)
-                if check_cookies(domain=get_domain(), headers={"User-Agent": user_agent}):
+                if check_cookies(domain=get_domain(), headers={"User-Agent": user_agent}) is not False:
                     headers = generate_requests_headers(cf_clearance, user_agent)
                 else:
                     set_cookies("", "")
