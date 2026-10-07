@@ -1,4 +1,12 @@
-from src.utils.config.config import get_cookies, set_cookies, check_cookies, get_domain_cookies, set_domain_cookies, check_domain_cookies
+from src.utils.config.config import (
+    check_cookies,
+    check_domain_cookies,
+    get_cookies,
+    get_domain_cookies,
+    is_cloudflare_checks_enabled,
+    set_cookies,
+    set_domain_cookies,
+)
 from src.utils.print.print_status import print_status
 from src.var import Colors, get_domain, print_header, print_separator, print_tutorial, generate_requests_headers, SourceDomains
 from src.utils.check.is_cloudflare_here import check_if_cloudflare_enabled, check_if_url_blocked
@@ -54,7 +62,7 @@ def ensure_domain_cookies(domain, test_url=None, extra_headers=None):
     stored under its own key so they never clash with each other. Interactive
     only (the fallback script must never hang on input() in the background -
     callers only invoke this when interactive)."""
-    if domain in _cloudflare_skipped_domains:
+    if not is_cloudflare_checks_enabled() or domain in _cloudflare_skipped_domains:
         return
 
     stored = get_domain_cookies(domain)
@@ -85,6 +93,7 @@ def ensure_domain_cookies(domain, test_url=None, extra_headers=None):
         return
 
     set_domain_cookies(domain, cf_clearance, user_agent)
+    print_status(f"Saved the {domain} cookie in your user config for future runs.", "success")
     verdict = check_domain_cookies(domain, {"User-Agent": user_agent}, test_url, extra_headers)
     if verdict:
         print_status(f"{domain} cookies are valid.", "success")
@@ -97,37 +106,42 @@ def ensure_domain_cookies(domain, test_url=None, extra_headers=None):
     _cloudflare_skipped_domains.add(domain)
     print_status(f"Could not validate {domain} cookies. Continuing without them; the site may still block requests.", "warning")
 
-print(f"Checking if cloudflare is enabled on {get_domain()}..")
-cloudflare = check_if_cloudflare_enabled(domain=get_domain(), headers={"User-Agent": "Mozilla/5.0"})
 headers = generate_requests_headers(None, "Mozilla/5.0")
 
-if cloudflare:
-    print("Cloudflare may be enabled. You can provide a cookie or continue without one.")
-    cookies_info = get_cookies()
-    if cookies_info:
-        cf_clearance, stored_headers = cookies_info
-        user_agent = stored_headers.get("User-Agent")
-        # only a real refusal erases the cookie; None = site unreachable, keep it
-        if check_cookies(domain=get_domain(), headers={"User-Agent": user_agent}) is False:
-            set_cookies("", "")
-            cookies_info = False
+if is_cloudflare_checks_enabled():
+    print(f"Checking if cloudflare is enabled on {get_domain()}..")
+    cloudflare = check_if_cloudflare_enabled(domain=get_domain(), headers={"User-Agent": "Mozilla/5.0"})
 
-    if not cookies_info:
-        if wants_cloudflare_cookie(get_domain()):
-            cf_clearance, user_agent = tutorial_input()
-            if cf_clearance and user_agent:
-                set_cookies(cf_clearance, user_agent)
-                if check_cookies(domain=get_domain(), headers={"User-Agent": user_agent}) is not False:
-                    headers = generate_requests_headers(cf_clearance, user_agent)
+    if cloudflare:
+        print("Cloudflare may be enabled. You can provide a cookie or continue without one.")
+        cookies_info = get_cookies()
+        if cookies_info:
+            cf_clearance, stored_headers = cookies_info
+            user_agent = stored_headers.get("User-Agent")
+            # only a real refusal erases the cookie; None = site unreachable, keep it
+            if check_cookies(domain=get_domain(), headers={"User-Agent": user_agent}) is False:
+                set_cookies("", "")
+                cookies_info = False
+
+        if not cookies_info:
+            if wants_cloudflare_cookie(get_domain()):
+                cf_clearance, user_agent = tutorial_input()
+                if cf_clearance and user_agent:
+                    set_cookies(cf_clearance, user_agent)
+                    print_status("Saved the Anime-Sama cookie in your user config for future runs.", "success")
+                    if check_cookies(domain=get_domain(), headers={"User-Agent": user_agent}) is not False:
+                        headers = generate_requests_headers(cf_clearance, user_agent)
+                    else:
+                        set_cookies("", "")
+                        print_status("Could not validate the Cloudflare cookie. Continuing without it; the site may still block requests.", "warning")
                 else:
-                    set_cookies("", "")
-                    print_status("Could not validate the Cloudflare cookie. Continuing without it; the site may still block requests.", "warning")
+                    print_status("Continuing without Cloudflare cookies. The site may still block requests.", "warning")
             else:
                 print_status("Continuing without Cloudflare cookies. The site may still block requests.", "warning")
         else:
-            print_status("Continuing without Cloudflare cookies. The site may still block requests.", "warning")
-    else:
-        headers = generate_requests_headers(cf_clearance, user_agent)
+            headers = generate_requests_headers(cf_clearance, user_agent)
+else:
+    print_status("Cloudflare checks are disabled. Requests will continue without Cloudflare cookies.", "warning")
 
 # Same check for Nakanime, right alongside the main domain's - but only when
 # this is a bare, fully-interactive launch (no CLI args at all). fallback.py
@@ -137,16 +151,17 @@ if cloudflare:
 # `interactive`.
 import sys as _sys
 if len(_sys.argv) == 1:
-    print("Checking if cloudflare is enabled on nakanime.tv..")
-    if check_if_cloudflare_enabled(domain="nakanime.tv", headers={"User-Agent": "Mozilla/5.0"}):
-        ensure_domain_cookies("nakanime.tv")
+    if is_cloudflare_checks_enabled():
+        print("Checking if cloudflare is enabled on nakanime.tv..")
+        if check_if_cloudflare_enabled(domain="nakanime.tv", headers={"User-Agent": "Mozilla/5.0"}):
+            ensure_domain_cookies("nakanime.tv")
 
-    # Franime: only its API is behind the challenge (the home page is open), so
-    # test an API URL instead of the home page.
-    from src.utils.fetch.fetch_episodes import FRANIME_TEST_URL, FRANIME_API_HEADERS
-    print("Checking if cloudflare is enabled on franime.fr..")
-    if check_if_url_blocked(FRANIME_TEST_URL, {"User-Agent": "Mozilla/5.0", **FRANIME_API_HEADERS}):
-        ensure_domain_cookies("franime.fr", test_url=FRANIME_TEST_URL, extra_headers=FRANIME_API_HEADERS)
+        # Franime: only its API is behind the challenge (the home page is open), so
+        # test an API URL instead of the home page.
+        from src.utils.fetch.fetch_episodes import FRANIME_TEST_URL, FRANIME_API_HEADERS
+        print("Checking if cloudflare is enabled on franime.fr..")
+        if check_if_url_blocked(FRANIME_TEST_URL, {"User-Agent": "Mozilla/5.0", **FRANIME_API_HEADERS}):
+            ensure_domain_cookies("franime.fr", test_url=FRANIME_TEST_URL, extra_headers=FRANIME_API_HEADERS)
 
 import os
 import re
@@ -209,6 +224,40 @@ def parse_selection_indices(user_input, count):
                 print_status(f"Number {num} is out of range (1-{count})", "error")
 
     return indices
+
+
+def _print_search_results(results):
+    """Display search matches in a consistent, scannable format."""
+    ordered = [
+        result
+        for site in dict.fromkeys(result.get("site") for result in results)
+        for result in results
+        if result.get("site") == site
+    ]
+    print(f"\n{Colors.BOLD}{Colors.HEADER}🔍 SEARCH RESULTS{Colors.ENDC}")
+    print_separator(title=f"{len(ordered)} matches")
+
+    support_labels = {
+        "Anime Supported": ("Anime", Colors.OKGREEN),
+        "Scans Supported": ("Scans", Colors.OKGREEN),
+        "Anime & Scans Supported": ("Anime + scans", Colors.OKGREEN),
+        "Unknown": ("Status unknown", Colors.WARNING),
+    }
+    for index, result in enumerate(ordered, 1):
+        site_key = result.get("site")
+        site = SITE_DISPLAY_NAMES.get(site_key, site_key or "Other")
+        if index == 1 or site_key != ordered[index - 2].get("site"):
+            print(f"\n{Colors.BOLD}{Colors.OKBLUE}{site}{Colors.ENDC}")
+
+        badge = ""
+        if result.get("support") in support_labels:
+            label, color = support_labels[result["support"]]
+            badge = f"  {color}[{label}]{Colors.ENDC}"
+
+        print(f"  {Colors.OKCYAN}{index:>2}. {result.get('title', 'Untitled')}{Colors.ENDC}{badge}")
+        print(f"      {Colors.DIM}{result.get('url', '')}{Colors.ENDC}")
+
+    return ordered
 
 
 NAKANIME_FETCH_ALL_MAX = 45
@@ -718,18 +767,7 @@ def main():
             if not results:
                 print_status("No results found for search query.", "error")
                 return 1
-            print(f"\n{Colors.BOLD}{Colors.HEADER}🔍 SEARCH RESULTS{Colors.ENDC}")
-            print_separator()
-            ordered = [r for site in dict.fromkeys(r.get('site') for r in results) for r in results if r.get('site') == site]
-            for i, res in enumerate(ordered, 1):
-                if i == 1 or res.get('site') != ordered[i - 2].get('site'):
-                    print(f"\n{Colors.BOLD}-- {SITE_DISPLAY_NAMES.get(res.get('site'), res.get('site') or 'Other')} --{Colors.ENDC}")
-                support_text = ""
-                if res.get('support') == "Anime Supported":
-                    support_text = f" {Colors.OKGREEN}(Anime Supported){Colors.ENDC}"
-                elif res.get('support') == "Scans Supported":
-                    support_text = f" {Colors.OKGREEN}(Scans Supported){Colors.ENDC}"
-                print(f"{Colors.OKCYAN}{i}. {res['title']}{support_text} ({res['url']}){Colors.ENDC}")
+            ordered = _print_search_results(results)
 
             while True:
                 try:
@@ -746,48 +784,33 @@ def main():
 
 
         if not base_url:
-            show_tutorial = input(f"{Colors.BOLD}Show tutorial? (y/n, default: n): {Colors.ENDC}").strip().lower()
-            if show_tutorial in ['y', 'yes', '1']:
-                print_tutorial()
-                input(f"\n{Colors.BOLD}Press Enter to continue...{Colors.ENDC}")
-            
             while True:
-                print(f"\n{Colors.BOLD}{Colors.HEADER}🔗 ANIME-SAMA SELECTION{Colors.ENDC}")
-                print_separator()
-                print(f"{Colors.OKCYAN}1. Paste URL{Colors.ENDC}")
-                print(f"{Colors.OKCYAN}2. Search Anime{Colors.ENDC}")
-                print(f"{Colors.OKCYAN}3. Settings{Colors.ENDC}")
-                mode = input(f"{Colors.BOLD}Choice (1/2/3): {Colors.ENDC}").strip()
+                print(f"\n{Colors.BOLD}{Colors.HEADER}GET STARTED{Colors.ENDC}")
+                print_separator(title="Choose an action")
+                print(f"  {Colors.OKCYAN}1  Paste a season URL{Colors.ENDC}   {Colors.DIM}Use a link you already have{Colors.ENDC}")
+                print(f"  {Colors.OKCYAN}2  Search by anime title{Colors.ENDC} {Colors.DIM}Find a series across supported sites{Colors.ENDC}")
+                print(f"  {Colors.OKCYAN}3  Settings{Colors.ENDC}             {Colors.DIM}Change save and identification options{Colors.ENDC}")
+                print(f"  {Colors.OKCYAN}4  How to use{Colors.ENDC}            {Colors.DIM}See the quick-start guide{Colors.ENDC}")
+                print(f"  {Colors.DIM}0  Exit{Colors.ENDC}")
+                mode = input(f"\n{Colors.BOLD}Select [1-4, 0 to exit]: {Colors.ENDC}").strip().lower()
                 
                 if mode == '1':
                     while True:
-                        base_url = input(f"{Colors.BOLD}Enter the complete anime-sama URL: {Colors.ENDC}").strip()
+                        base_url = input(f"{Colors.BOLD}Paste the complete anime season URL: {Colors.ENDC}").strip()
                         if not base_url: continue
                         break
                     break
                 elif mode == '2':
                     query = input(f"{Colors.BOLD}Enter search query: {Colors.ENDC}").strip()
+                    if not query:
+                        print_status("Enter an anime title to search.", "warning")
+                        continue
                     results = search_anime(query, headers=headers)
                     if not results:
                         print_status("No results found.", "error")
                         continue
                     
-                    print(f"\n{Colors.BOLD}{Colors.HEADER}🔍 SEARCH RESULTS{Colors.ENDC}")
-                    print_separator()
-                    ordered = [r for site in dict.fromkeys(r.get('site') for r in results) for r in results if r.get('site') == site]
-                    for i, res in enumerate(ordered, 1):
-                         if i == 1 or res.get('site') != ordered[i - 2].get('site'):
-                             print(f"\n{Colors.BOLD}-- {SITE_DISPLAY_NAMES.get(res.get('site'), res.get('site') or 'Other')} --{Colors.ENDC}")
-                         support_text = ""
-                         if res.get('support') == "Anime Supported":
-                             support_text = f" {Colors.OKGREEN}(Anime Supported){Colors.ENDC}"
-                         elif res.get('support') == "Scans Supported":
-                             support_text = f" {Colors.OKGREEN}(Scans Supported){Colors.ENDC}"
-                         elif res.get('support') == "Anime & Scans Supported":
-                             support_text = f" {Colors.OKGREEN}(Anime & Scans Supported){Colors.ENDC}"
-                         elif res.get('support') == "Unknown":
-                             support_text = f" {Colors.FAIL}(Status Unknown){Colors.ENDC}"
-                         print(f"{Colors.OKCYAN}{i}. {res['title']}{support_text}{Colors.ENDC}")
+                    ordered = _print_search_results(results)
 
                     valid_choice = False
                     while True:
@@ -847,8 +870,13 @@ def main():
                         break
                 elif mode == '3':
                     settings_menu()
+                elif mode == '4':
+                    print_tutorial()
+                    input(f"\n{Colors.BOLD}Press Enter to return to the menu...{Colors.ENDC}")
+                elif mode in ('0', 'q', 'quit', 'exit'):
+                    return 0
                 else:
-                    print_status("Invalid option", "error")
+                    print_status("Choose 1, 2, 3, 4, or 0 to exit.", "warning")
         
         is_valid, _ = validate_anime_sama_url(base_url)
         if not is_valid:
