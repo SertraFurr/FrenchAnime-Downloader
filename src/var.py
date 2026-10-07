@@ -70,8 +70,6 @@ def get_domain():
     return "anime-sama.to"
 
 def generate_requests_headers(cf_clearance, user_agent=None):
-    cookies = f"cf_clearance={cf_clearance}"
-
     headers = {
         "User-Agent": user_agent,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
@@ -80,8 +78,9 @@ def generate_requests_headers(cf_clearance, user_agent=None):
         "Origin": "https://anime-sama.si",
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",
-        "Cookie": cookies,
     }
+    if cf_clearance:
+        headers["Cookie"] = f"cf_clearance={cf_clearance}"
     return headers
 
 class Colors:
@@ -98,20 +97,15 @@ class Colors:
     MAGENTA = '\033[35m'
 
 def print_header():
-    w = 62
-    inner = "ANIME  VIDEO  DOWNLOADER"
-    pad   = lambda s: s.center(w)
-    header = (
-        f"\n{Colors.HEADER}{Colors.BOLD}"
-        f"╔{'═' * w}╗\n"
-        f"║{pad(inner)}║\n"
-        f"╚{'═' * w}╝"
-        f"{Colors.ENDC}\n"
-        f"{Colors.DIM}  {'─' * (w + 2)}{Colors.ENDC}\n"
-        f"  {Colors.OKCYAN}📺  {Colors.DIM}Download anime episodes from your favourite streaming sites.{Colors.ENDC}\n"
-        f"  {Colors.DIM}Type a URL, search by name, or browse seasons.{Colors.ENDC}\n"
+    width = 66
+    title = "ANIME VIDEO DOWNLOADER"
+    print(
+        f"\n{Colors.OKCYAN}{'━' * width}{Colors.ENDC}\n"
+        f"{Colors.BOLD}{Colors.HEADER}{title.center(width)}{Colors.ENDC}\n"
+        f"{Colors.OKCYAN}{'━' * width}{Colors.ENDC}\n"
+        f"{Colors.DIM}{'Anime-Sama  ·  FRAnime  ·  Nakanime'.center(width)}{Colors.ENDC}\n"
+        f"{Colors.DIM}{'Search, choose episodes, and download.'.center(width)}{Colors.ENDC}\n"
     )
-    print(header)
 
 def print_tutorial():
     tutorial = f"""
