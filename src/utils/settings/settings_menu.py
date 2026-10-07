@@ -1,6 +1,86 @@
 import os
-from src.var import Colors, print_header, print_separator, print_status
-from src.utils.config.config import get_setting, set_setting
+from src.var import Colors, get_domain, print_header, print_separator, print_status
+from src.utils.config.config import (
+    check_cookies,
+    get_cookies,
+    get_setting,
+    is_cloudflare_checks_enabled,
+    set_cookies,
+    set_setting,
+)
+
+
+def _cloudflare_cookie_menu():
+    while True:
+        enabled = is_cloudflare_checks_enabled()
+        stored = get_cookies(include_disabled=True)
+        status = f"{Colors.OKGREEN}enabled{Colors.ENDC}" if enabled else f"{Colors.WARNING}disabled{Colors.ENDC}"
+        cookie_status = f"{Colors.OKGREEN}saved{Colors.ENDC}" if stored else f"{Colors.WARNING}not set{Colors.ENDC}"
+        print(f"\n{Colors.BOLD}Cloudflare settings (all supported sites){Colors.ENDC}")
+        print(f"Cloudflare checks: {status}")
+        print(f"Saved cookie: {cookie_status}")
+        if not enabled:
+            print(f"{Colors.WARNING}Off means no Cloudflare detection or cookie use; downloads may be blocked.{Colors.ENDC}")
+        toggle_label = "Disable checks and cookie use" if enabled else "Enable checks and cookie use"
+        print(f"{Colors.OKCYAN}1. {toggle_label}{Colors.ENDC}")
+        print(f"{Colors.OKCYAN}2. Verify saved cookie{Colors.ENDC}")
+        print(f"{Colors.OKCYAN}3. Set or replace cookie{Colors.ENDC}")
+        print(f"{Colors.OKCYAN}4. Clear saved cookie{Colors.ENDC}")
+        print(f"{Colors.OKCYAN}0. Back{Colors.ENDC}")
+        choice = input(f"{Colors.BOLD}Select option: {Colors.ENDC}").strip()
+
+        if choice == "1":
+            set_setting("cloudflare_checks_enabled", not enabled)
+            if enabled:
+                print_status("Cloudflare detection, verification, prompts, and saved-cookie use are now disabled.", "warning")
+            else:
+                print_status("Cloudflare detection and saved-cookie use are enabled.", "success")
+            input("Press Enter to continue...")
+        elif choice == "2":
+            if not enabled:
+                print_status("Enable Cloudflare checks first to verify a cookie. Disabled mode makes no verification request.", "warning")
+                input("Press Enter to continue...")
+                continue
+            if not stored:
+                print_status("No Cloudflare cookie is saved yet. Choose option 3 to set one.", "warning")
+                input("Press Enter to continue...")
+                continue
+            _, headers = stored
+            check_cookies(get_domain(), {"User-Agent": headers["User-Agent"]})
+            input("Press Enter to continue...")
+        elif choice == "3":
+            print_status(f"Open {get_domain()} in your browser and copy its cf_clearance cookie.", "info")
+            cf_clearance = input("cf_clearance value: ").strip().strip("'\"")
+            user_agent = input("Browser User-Agent (from navigator.userAgent): ").strip().strip("'\"")
+            if not cf_clearance or not user_agent:
+                print_status("Both the cookie and matching browser User-Agent are required.", "warning")
+            elif not enabled:
+                set_cookies(cf_clearance, user_agent)
+                print_status("Cookie saved but not verified or used because Cloudflare checks are disabled.", "warning")
+            else:
+                set_cookies(cf_clearance, user_agent)
+                verdict = check_cookies(get_domain(), {"User-Agent": user_agent})
+                if verdict is False:
+                    set_cookies("", "")
+                    print_status("Cookie verification failed; the rejected cookie was not kept.", "warning")
+                elif verdict is True:
+                    print_status("Cookie saved and verified for future launches.", "success")
+                else:
+                    print_status("Could not verify the cookie due to a network issue; it remains saved.", "warning")
+            input("Press Enter to continue...")
+        elif choice == "4":
+            if not stored:
+                print_status("No Cloudflare cookie is currently saved.", "info")
+            elif input("Clear the saved cookie? (y/N): ").strip().lower() in ("y", "yes"):
+                set_cookies("", "")
+                print_status("Saved Cloudflare cookie cleared.", "success")
+            else:
+                print_status("Kept the saved cookie.", "info")
+            input("Press Enter to continue...")
+        elif choice == "0":
+            return
+        else:
+            print_status("Choose 1, 2, 3, 4, or 0.", "warning")
 
 def settings_menu():
     while True:
@@ -20,6 +100,7 @@ def settings_menu():
         print(f"   {Colors.WARNING}Current: {current_id_mode}{Colors.ENDC}")
         print(f"\n{Colors.OKCYAN}3. Set TVDB API Key{Colors.ENDC} {Colors.FAIL}(requires a free account, see below){Colors.ENDC}")
         print(f"   {Colors.WARNING}Current: {tvdb_key_display}{Colors.ENDC}")
+        print(f"\n{Colors.OKCYAN}4. Cloudflare Checks / Cookie{Colors.ENDC}")
         print(f"\n{Colors.OKCYAN}0. Back to Main Menu{Colors.ENDC}")
         print_separator()
 
@@ -76,6 +157,9 @@ def settings_menu():
             else:
                 print_status("TVDB API key cleared - TVDB search results disabled.", "warning")
             input("Press Enter to continue...")
+
+        elif choice == '4':
+            _cloudflare_cookie_menu()
 
         elif choice == '0':
             break
