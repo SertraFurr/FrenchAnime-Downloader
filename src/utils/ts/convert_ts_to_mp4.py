@@ -2,6 +2,7 @@ import subprocess
 import os
 import sys
 from src.var        import print_status
+from src.utils.ts.align_av_start import align_av_start
 
 _FIX_TS_WORKER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_fix_ts_worker.py")
 _FIX_TS_TIMEOUT = 180
@@ -57,6 +58,7 @@ def convert_ts_to_mp4(input_path, output_path, pre_selected_tool=None):
                 print_status(process.stderr.strip(), "warning")
             if process.returncode == 0:
                 print_status(f"Video converted successfully to {output_path}", "success")
+                align_av_start(output_path)
                 return True, output_path
             else:
                 print_status("FFmpeg conversion failed", "error")
@@ -69,6 +71,7 @@ def convert_ts_to_mp4(input_path, output_path, pre_selected_tool=None):
         try:
             _run_fix_ts_with_timeout(input_path, output_path)
             print_status(f"Video converted successfully to {output_path}", "success")
+            align_av_start(output_path)
             return True, output_path
         except Exception as e:
             print_status(f"AV conversion failed: {str(e)}", "error")
@@ -90,6 +93,7 @@ def convert_ts_to_mp4(input_path, output_path, pre_selected_tool=None):
                             print_status(process.stderr.strip(), "warning")
                         if process.returncode == 0:
                             print_status(f"Video converted successfully to {ff_output}", "success")
+                            align_av_start(ff_output)
                             return True, ff_output
                         else:
                             print_status("FFmpeg fallback conversion failed", "error")
