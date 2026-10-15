@@ -6,7 +6,7 @@
 <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux_(mostly_windows)-lightgrey.svg?style=for-the-badge" alt="Platform">
 <img src="https://img.shields.io/badge/License-GPL_3-green.svg?style=for-the-badge" alt="License">
  
-**A powerful, beautiful and simple CLI tool to download anime episodes from Anime-Sama, FRAnime & Nakanime. (More coming)**
+**A powerful, beautiful and simple CLI tool to download anime episodes from Anime-Sama, FRAnime, Nakanime & French-Manga. (More coming)**
 
 (✨55 STARS✨! Thanks!) 
 

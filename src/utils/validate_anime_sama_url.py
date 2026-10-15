@@ -1,25 +1,14 @@
-import re
-import urllib.parse
-from src.var import Colors, get_domain
+"""Is this URL the URL of a SEASON the program knows how to download?
+
+Each site's pattern is in src/sites/<site>/__init__.py (season_url_pattern).
+"""
+from src.sites import SITES
+
 
 def validate_anime_sama_url(url):
-    anime_sama_pattern = re.compile(
-        r'^https?://(?:www\.)?anime-sama\.[^/]+/catalogue/[^/]+/.+/.+/?$', 
-        re.IGNORECASE
-    )
-    nakanime_pattern = re.compile(
-        r'^https?://(?:www\.)?nakanime\.tv/(?:anime/\d+|catalog\?.*overlay=).*$',
-        re.IGNORECASE
-    )
-    franime_pattern = re.compile(
-        r'^https?://(?:www\.)?franime\.fr/anime/[^/?]+\?.*anime_id=\d+.*$',
-        re.IGNORECASE
-    )
-    if anime_sama_pattern.match(url) or nakanime_pattern.match(url) or franime_pattern.match(url):
-        return True, ""
-    else:
-        return False, (
-            f"{url} Invalid URL. Format should be:\n"
-            f"  https://{get_domain()}/catalogue/<anime-name>/<season-type>/<language>/\n"
-            f"  https://nakanime.tv/anime/<id>/season/<s_num>/episode/<ep_num>\n"
-        )
+    for site in SITES:
+        if site.season_url_pattern and site.season_url_pattern.match(url):
+            return True, ""
+
+    exemples = "".join(f"  {s.url_example}\n" for s in SITES if s.url_example)
+    return False, f"{url} Invalid URL. Format should be:\n{exemples}"

@@ -4,6 +4,8 @@ import requests
 from urllib.parse import urlparse
 
 from src.var                                            import print_status, SourceDomains
+from src.utils.network.tls_compat                    import apply as _apply_tls
+_apply_tls()
 from src.utils.parse.parse_m3u8_content                 import parse_m3u8_content
 from src.utils.extract.extract_movearnpre_video_source  import extract_movearnpre_video_source
 from src.utils.extract.extract_sendvid_video_source     import extract_sendvid_video_source

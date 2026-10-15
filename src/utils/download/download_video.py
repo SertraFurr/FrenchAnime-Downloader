@@ -8,6 +8,8 @@ from tqdm import tqdm
 from concurrent.futures                 import ThreadPoolExecutor, as_completed
 
 from src.var                            import Colors, print_status, DEFAULT_USER_AGENT
+from src.utils.network.tls_compat    import apply as _apply_tls
+_apply_tls()
 from src.utils.parse.parse_ts_segments  import parse_ts_segments
 from src.utils.tqdm_position             import TqdmPosition as _TqdmPosition
 
@@ -54,6 +56,52 @@ MIN_VIDEO_BYTES = 200 * 1024
 
 def _is_placeholder_size(total_size):
     return 0 < total_size < MIN_VIDEO_BYTES
+
+
+def _hls_aes_params(playlist_text, headers, base_url):
+    """Decryption parameters of an AES-128 encrypted HLS playlist, or None if it is not encrypted.
+
+    Returns (key, fixed_iv_in_hex_or_None, sequence_number_of_the_first_segment).
+    Without an IV in the playlist, a segment's IV is its sequence number (16 bytes, big-endian)."""
+    from urllib.parse import urljoin
+
+    m = re.search(r'#EXT-X-KEY:([^\r\n]+)', playlist_text)
+    if not m:
+        return None
+    attrs = m.group(1)
+    method = re.search(r'METHOD=([A-Za-z0-9-]+)', attrs)
+    method = method.group(1).upper() if method else "NONE"
+    if method == "NONE":
+        return None
+    if method != "AES-128":
+        raise ValueError(f"unsupported HLS encryption method {method}")
+
+    uri = re.search(r'URI="([^"]+)"', attrs)
+    if not uri:
+        raise ValueError("encrypted playlist without key URI")
+    key_url = urljoin(base_url, uri.group(1))
+    key_resp = requests.get(key_url, headers=headers, timeout=15)
+    key_resp.raise_for_status()
+    key = key_resp.content
+    if len(key) != 16:
+        raise ValueError(f"unexpected key length ({len(key)} bytes)")
+
+    iv = re.search(r'IV=0[xX]([0-9a-fA-F]+)', attrs)
+    seq = re.search(r'#EXT-X-MEDIA-SEQUENCE:(\d+)', playlist_text)
+    return key, (iv.group(1) if iv else None), (int(seq.group(1)) if seq else 0)
+
+
+def _decrypt_hls_segment(data, aes, index):
+    """Decrypt a segment (AES-128-CBC, PKCS7 padding); `index` = the segment's rank in the playlist."""
+    from Crypto.Cipher import AES
+
+    key, iv_hex, first_sequence = aes
+    iv = bytes.fromhex(iv_hex.zfill(32)) if iv_hex else (first_sequence + index).to_bytes(16, "big")
+    raw = AES.new(key, AES.MODE_CBC, iv).decrypt(data[:len(data) // 16 * 16])
+    pad = raw[-1] if raw else 0
+    if 1 <= pad <= 16 and raw.endswith(bytes([pad]) * pad):
+        raw = raw[:-pad]
+    return raw
 
 
 def download_video(video_url, save_path, use_ts_threading=False, url='',automatic_mp4=False, threaded_mp4=False, interactive=True):
@@ -168,12 +216,26 @@ def download_video(video_url, save_path, use_ts_threading=False, url='',automati
                 print_status("No .ts segments found in M3U8 playlist", "error")
                 return False, None
             
+            # AES-128 encrypted stream (LuluStream): without decryption the assembled
+            # segments do not form a playable video.
+            try:
+                aes = _hls_aes_params(content, headers, base_for_join)
+            except Exception as e:
+                print_status(f"Could not prepare the HLS decryption key: {e}", "error")
+                return False, None
+            first_media_index = 1 if init_segment_url else 0
+
+            def _clear_segment(index, data):
+                if aes is None or index < first_media_index:
+                    return data
+                return _decrypt_hls_segment(data, aes, index - first_media_index)
+
             dir_name = os.path.dirname(save_path)
             if dir_name:
                 os.makedirs(dir_name, exist_ok=True)
             temp_ts_path = save_path.replace('.mp4', '.ts')
             random_string = os.path.basename(save_path).replace('.mp4', '.ts')
-            
+
             if use_threads:
                 segment_data = []
                 
@@ -182,7 +244,7 @@ def download_video(video_url, save_path, use_ts_threading=False, url='',automati
                         try:
                             seg_response = requests.get(segment_url, headers=headers, stream=True, timeout=10)
                             seg_response.raise_for_status()
-                            return index, seg_response.content
+                            return index, _clear_segment(index, seg_response.content)
                         except requests.RequestException as e:
                             if attempt < 2:
                                 time.sleep(2)
@@ -214,7 +276,7 @@ def download_video(video_url, save_path, use_ts_threading=False, url='',automati
                             try:
                                 seg_response = requests.get(segment_url, headers=headers, stream=True, timeout=10)
                                 seg_response.raise_for_status()
-                                f.write(seg_response.content)
+                                f.write(_clear_segment(i, seg_response.content))
                                 break
                             except requests.RequestException as e:
                                 if attempt < 2:

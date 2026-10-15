@@ -1,55 +1,12 @@
-import re
-import json
-import requests
-import urllib.parse
+"""Title of an anime from its URL.
 
-from src.utils.config.config import get_domain_cookies
+The code specific to each site is in src/sites/<site>/metadata.py.
+"""
+from src.sites import site_for_url
 
-NAKANIME_DOMAIN = "nakanime.tv"
 
 def extract_anime_name(base_url):
-    match = re.search(r'catalogue/([^/]+)/', base_url)
-    if match:
-        return match.group(1)
-    
-    if 'franime.fr' in base_url.lower():
-        # franime urls carry no title (only ?anime_id=), it lives in the catalogue
-        from src.utils.search.expand_catalogue import extract_franime_id, find_franime_anime
-        try:
-            anime = find_franime_anime(extract_franime_id(base_url))
-        except (KeyError, ValueError):
-            anime = None
-        if anime:
-            return anime.get("title") or anime.get("titleO") or "episode"
-        return "episode"
-
-    unquoted = urllib.parse.unquote(base_url)
-    nakanime_match = re.search(r'/anime/\d+/([^/&#?]+)', unquoted)
-    if nakanime_match and nakanime_match.group(1) not in ['season', 'episode']:
-        return nakanime_match.group(1)
-        
-    nakanime_id_match = re.search(r'/anime/(\d+)', unquoted)
-    if nakanime_id_match:
-        anime_id = nakanime_id_match.group(1)
-        try:
-            url = f"https://nakanime.tv/anime/{anime_id}/season/1/episode/1"
-            req_headers = {"User-Agent": "Mozilla/5.0"}
-            cookies = None
-            stored = get_domain_cookies(NAKANIME_DOMAIN)
-            if stored:
-                cf_clearance, stored_headers = stored
-                req_headers["User-Agent"] = stored_headers["User-Agent"]
-                cookies = {"cf_clearance": cf_clearance}
-            res = requests.get(url, headers=req_headers, cookies=cookies, timeout=5)
-            scripts = re.findall(r'<script[^>]*>(.*?)</script>', res.text, re.DOTALL)
-            for s in scripts:
-                if 'title' in s and 'animeId' in s:
-                    data = json.loads(s.strip())
-                    title = data.get('title')
-                    if title:
-                        return title
-        except Exception:
-            pass
-        return f"nakanime-{anime_id}"
-        
+    site = site_for_url(base_url)
+    if site.anime_name:
+        return site.anime_name(base_url) or "episode"
     return "episode"

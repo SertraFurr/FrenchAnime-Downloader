@@ -1,206 +1,21 @@
-import requests
-import time
+"""Search for an anime on every site.
+
+The code specific to each site is in src/sites/<site>/search.py; only what is
+common remains here: split the query, run the sites in parallel, rank.
+"""
 import re
-import json
-import urllib.parse
 import difflib
-from bs4 import BeautifulSoup
-from src.var import get_domain, print_status
 from concurrent.futures import ThreadPoolExecutor
-from urllib.parse import urljoin
 
-cO = "nkapiv1"
+from src.sites import SITES
+from src.sites._utils import dedupe as _dedupe
 
-def derive_nakanime_key(url_path):
-    N = cO + url_path
-    V = []
-    for v in range(32):
-        G = 0
-        for q in range(len(N)):
-            G = (G * 31 + ord(N[q]) + v) & 255
-        V.append(G)
-    return V
-
-def decode_nakanime_response(response_bytes, url_path):
-    key_bytes = derive_nakanime_key(url_path)
-    out = bytearray(len(response_bytes))
-    for i in range(len(response_bytes)):
-        out[i] = response_bytes[i] ^ key_bytes[i % len(key_bytes)]
-    return bytes(out)
-
-def _search_nakanime_one(query, headers=None):
-    encoded_query = urllib.parse.quote(query)
-    path = f"/api/catalog/search?q={encoded_query}&sort=relevance&page=1&per_page=32"
-    url = f"https://nakanime.tv{path}"
-    
-    req_headers = {"User-Agent": "Mozilla/5.0"}
-    if headers and "User-Agent" in headers:
-        req_headers["User-Agent"] = headers["User-Agent"]
-        
-    try:
-        response = requests.get(url, headers=req_headers, timeout=10)
-        response.raise_for_status()
-        decrypted = decode_nakanime_response(response.content, path)
-        data = json.loads(decrypted.decode('utf-8'))
-        
-        results = []
-        for item in data.get('data', []):
-            title = item.get('title', 'Unknown')
-            anime_id = item.get('id')
-            slug = item.get('slug')
-            if anime_id and slug:
-                full_url = f"https://nakanime.tv/anime/{anime_id}/{slug}"
-                results.append({
-                    "title": title,
-                    "url": full_url,
-                    "support": "Anime Supported",
-                    "site": "nakanime"
-                })
-        return results
-    except Exception as e:
-        print_status(f"Nakanime search failed: {str(e)}", "warning")
-        return []
-
-def _search_franime_one(query, headers=None):
-    resultats=[]
-    try:
-         
-        data = _fetch_franime_catalogue(headers)
-        for a in data:
-            if query.lower() in texte(a):
-                resultats.append({"title":a["titleO"],"id":a["id"],"site":"franime","url":f"https://franime.fr/anime/test?anime_id={a['id']}","support":"Anime Supported"})
-
-        return resultats
-
-    except Exception as e: print(e); return []
-
-def check_link_support(res, headers):
-    try:
-        from src.utils.search.expand_catalogue import is_valid_season
-        
-        r = requests.get(res['url'], headers=headers, timeout=5)
-        if r.status_code == 200:
-            content = r.text
-            
-            anime_matches = re.findall(r'panneauAnime\s*\(\s*(["\'])(.*?)\1\s*,\s*(["\'])(.*?)\3\s*\)', content)
-            
-            has_valid_anime = False
-            
-            base_url = res['url']
-            if not base_url.endswith('/'):
-                base_url += '/'
-
-            for _, name, _, rel_url in anime_matches:
-                if name == "nom" or rel_url == "url": continue
-                
-                full_url = urljoin(base_url, rel_url)
-                if not full_url.endswith('/'): full_url += '/'
-                
-                if is_valid_season(full_url, headers):
-                    has_valid_anime = True
-                    break
-            
-            if has_valid_anime:
-                scan_matches = re.findall(r'panneauScan\s*\(\s*(["\'])(.*?)\1\s*,\s*(["\'])(.*?)\3\s*\)', content)
-                valid_scan = [m for m in scan_matches if m[1] != "nom" and m[3] != "url"]
-                
-                if valid_scan:
-                    res['support'] = "Anime & Scans Supported"
-                else:
-                    res['support'] = "Anime Supported"
-            else:
-                scan_matches = re.findall(r'panneauScan\s*\(\s*(["\'])(.*?)\1\s*,\s*(["\'])(.*?)\3\s*\)', content)
-                valid_scan = [m for m in scan_matches if m[1] != "nom" and m[3] != "url"]
-                
-                if valid_scan:
-                    res['support'] = "Scans Supported"
-                else:
-                    res['support'] = "Unsupported"
-        else:
-            res['support'] = "Unknown"
-    except Exception:
-        res['support'] = "Unknown"
-    return res
-
-def _search_anime_sama_one(query, headers=None):
-    url = f"https://{get_domain()}/template-php/defaut/fetch.php"
-
-    data = {"query": query}
-    
-    try:
-        response = requests.post(url, headers=headers, data=data)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.text, 'html.parser')
-        results = []
-        for a in soup.find_all('a'):
-            href = a.get('href')
-            h3 = a.find('h3')
-            title = h3.text.strip() if h3 else "Unknown"
-            if href:
-                full_url = urljoin(f"https://{get_domain()}/", href)
-                results.append({"title": title, "url": full_url, "support": None, "site": "anime-sama"})
-        
-        return results
-    except Exception:
-        return []
-
-def _dedupe(results):
-    seen, out = set(), []
-    for r in results:
-        if r['url'] not in seen:
-            seen.add(r['url'])
-            out.append(r)
-    return out
-
-def search_nakanime(queries, headers=None):
-    queries = [queries] if isinstance(queries, str) else queries
-    return _dedupe([r for q in queries for r in _search_nakanime_one(q, headers)])
-
-def search_franime(queries, headers=None):
-    queries = [queries] if isinstance(queries, str) else queries
-    return _dedupe([r for q in queries for r in _search_franime_one(q, headers)])
-
-def search_anime_sama(queries, headers=None):
-    queries = [queries] if isinstance(queries, str) else queries
-    results = _dedupe([r for q in queries for r in _search_anime_sama_one(q, headers)])
-    if results:
-        with ThreadPoolExecutor(max_workers=10) as executor:
-            list(executor.map(lambda r: check_link_support(r, headers), results))
-    return results
-
-_FRANIME_CACHE = {"time": 0.0, "data": []}
-_FRANIME_CACHE_SECONDS = 600
-
-
-def _fetch_franime_catalogue(headers=None):
-    # The whole catalogue is several MB and a search asks for it once per
-    # keyword (and the season/episode steps again), so keep it for a few minutes.
-    if _FRANIME_CACHE["data"] and time.time() - _FRANIME_CACHE["time"] < _FRANIME_CACHE_SECONDS:
-        return _FRANIME_CACHE["data"]
-
-    req_headers = {"User-Agent": "Mozilla/5.0"}
-    if headers and "User-Agent" in headers:
-        req_headers["User-Agent"] = headers["User-Agent"]
-    try:
-        r = requests.get(
-            "https://api.franime.fr/api/animes",
-            headers=req_headers,
-            timeout=60,
-        )
-        r.raise_for_status()
-        data = r.json()
-    except Exception as e:
-        print(e)
-        return []
-
-    _FRANIME_CACHE["time"] = time.time()
-    _FRANIME_CACHE["data"] = data
-    return data
-
-
-def texte(a):
-    parts = [a.get("title"), a.get("titleO")] + list((a.get("titles") or {}).values())
-    return " ".join(p for p in parts if isinstance(p, str)).lower()
+# Former names, kept for the modules that still import them (the fallback).
+from src.sites.anime_sama.search import check_link_support, _search_anime_sama_one, search_anime_sama
+from src.sites.nakanime.search import _search_nakanime_one, search_nakanime
+from src.sites.franime.search import _search_franime_one, search_franime
+from src.sites.franime.catalogue import _FRANIME_CACHE, _FRANIME_CACHE_SECONDS, _fetch_franime_catalogue, texte
+from src.sites.french_manga.search import _search_frenchmanga_one, search_frenchmanga
 
 def _keywords(query):
     """The full query plus each keyword alone, so 'king raid' also finds "King's Raid"."""
@@ -227,6 +42,7 @@ def relevance(query, title):
     return max(covered * (0.9 if in_order else 0.7), ratio)
 
 MIN_SCORE = 0.5
+
 MIN_PER_SITE = 3
 
 def rank_results(query, results):
@@ -239,25 +55,21 @@ def rank_results(query, results):
     for g in by_site.values():
         g = sorted(g, key=lambda r: -r['score'])
         groups.append([r for i, r in enumerate(g) if i < MIN_PER_SITE or r['score'] >= MIN_SCORE])
-    order = {'anime-sama': 0, 'nakanime': 1, 'franime': 2}
+    order = {s.key: s.order for s in SITES}
     groups.sort(key=lambda g: order.get(g[0].get('site'), 99))
     return [r for g in groups for r in g]
 
+
 def search_anime(query, headers=None, site="all"):
     queries = _keywords(query)
-    if site and site.lower() == "nakanime":
-        return rank_results(query, search_nakanime(queries, headers=headers))
-    if site and site.lower() == "anime-sama":
-        return rank_results(query, search_anime_sama(queries, headers=headers))
-    if site and site.lower() == "franime":
-        return rank_results(query, search_franime(queries, headers=headers))
+    # one given site (by its name), otherwise all of them
+    chosen = [s for s in SITES if s.search and site and site.lower() == s.key] or [s for s in SITES if s.search]
 
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        future_sama = executor.submit(search_anime_sama, queries, headers)
-        future_naka = executor.submit(search_nakanime, queries, headers)
-        future_franime = executor.submit(search_franime, queries, headers)
-        results_sama = future_sama.result()
-        results_naka = future_naka.result()
-        results_franime = future_franime.result()
+    if len(chosen) == 1:
+        return rank_results(query, chosen[0].search(queries, headers=headers))
 
-    return rank_results(query, results_sama + results_naka + results_franime)
+    with ThreadPoolExecutor(max_workers=len(chosen)) as executor:
+        futures = [executor.submit(s.search, queries, headers) for s in chosen]
+        results = [r for f in futures for r in f.result()]
+
+    return rank_results(query, results)

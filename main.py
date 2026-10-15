@@ -11,7 +11,8 @@ from src.utils.print.print_status import print_status
 from src.var import Colors, get_domain, print_header, print_separator, print_tutorial, generate_requests_headers, SourceDomains
 from src.utils.check.is_cloudflare_here import check_if_cloudflare_enabled, check_if_url_blocked
 
-SITE_DISPLAY_NAMES = {"anime-sama": "Anime-Sama", "nakanime": "Nakanime", "franime": "FRAnime"}
+from src.sites import SITES, site_for_url
+SITE_DISPLAY_NAMES = {s.key: s.name for s in SITES}
 
 _prefilled_cookies = {}
 
@@ -162,6 +163,14 @@ if len(_sys.argv) == 1:
         print("Checking if cloudflare is enabled on franime.fr..")
         if check_if_url_blocked(FRANIME_TEST_URL, {"User-Agent": "Mozilla/5.0", **FRANIME_API_HEADERS}):
             ensure_domain_cookies("franime.fr", test_url=FRANIME_TEST_URL, extra_headers=FRANIME_API_HEADERS)
+
+        # french-manga: the cookie is only asked for when the site really refuses the
+        # connection (depending on the connection a plain Python client gets through).
+        # It is set on `.french-manga.net`: one entry covers w16, w17...
+        from src.sites.french_manga.http import TEST_URL as FRENCHMANGA_TEST_URL, COOKIE_DOMAIN as FRENCHMANGA_DOMAIN
+        print("Checking if cloudflare is enabled on french-manga.net..")
+        if check_if_url_blocked(FRENCHMANGA_TEST_URL, {"User-Agent": "Mozilla/5.0"}):
+            ensure_domain_cookies(FRENCHMANGA_DOMAIN, test_url=FRENCHMANGA_TEST_URL)
 
 import os
 import re
@@ -360,6 +369,13 @@ def plan_season(base_url, args, headers, interactive):
                     if indices:
                         wanted_episodes = {i + 1 for i in indices}
 
+    # french-manga: if Cloudflare refuses the connection now, ask for the cookie again
+    # (interactive only: the fallback must never wait for input).
+    if interactive and 'french-manga.net' in base_url.lower():
+        from src.sites.french_manga.http import TEST_URL as _FM_TEST_URL, COOKIE_DOMAIN as _FM_DOMAIN
+        if check_if_url_blocked(_FM_TEST_URL, {"User-Agent": "Mozilla/5.0"}):
+            ensure_domain_cookies(_FM_DOMAIN, test_url=_FM_TEST_URL)
+
     episodes = fetch_episodes(base_url, headers=headers, wanted_episodes=wanted_episodes)
     if not episodes:
         print_status("Failed to fetch episodes.", "error")
@@ -451,13 +467,8 @@ def plan_season(base_url, args, headers, interactive):
         return None
 
     get_anime_name = extract_anime_name(base_url)
-    if 'nakanime.tv' in base_url.lower() or 'nakanime.fr' in base_url.lower():
-        m_season = re.search(r'/season/(\d+)', base_url)
-        get_saison_info = f"saison{m_season.group(1)}" if m_season else "saison1"
-    elif 'franime.fr' in base_url.lower():
-        get_saison_info = f"saison{extract_franime_season(base_url)}"
-    else:
-        get_saison_info = base_url.split('/')[-3]
+    # the "saisonN" folder name comes from the site that owns the URL (src/sites/<site>/metadata.py)
+    get_saison_info = site_for_url(base_url).season_info(base_url)
 
 
     if args.dest:
